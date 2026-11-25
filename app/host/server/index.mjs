@@ -107,6 +107,9 @@ const DIST = process.env.STRATA_DIST
     ? resolve(argv[distFlag + 1] ?? join(ROOT, 'dist'))
     : join(ROOT, 'dist');
 const PORT = Number(process.env.STRATA_PORT ?? 8791);
+/** The origins THIS host's page is served from (the shell loads `http://127.0.0.1:<PORT>`; `localhost` and `[::1]` are the
+ *  same host).  This is what a packaged app accepts on /api - not "any localhost port", see the router below. */
+const SELF_ORIGINS = new Set([`http://127.0.0.1:${PORT}`, `http://localhost:${PORT}`, `http://[::1]:${PORT}`]);
 const HOST = process.env.STRATA_BIND ?? '127.0.0.1';
 /* The folder chats work in when nothing else is chosen. It is never the app's own folder (the host is started inside its install
    directory, so `process.cwd()` was "host" in the sidebar and the agent could read and write the app): the person's own
@@ -1024,6 +1027,11 @@ const server = http.createServer(async (req, res) => {
     if (path.startsWith('/api/') && req.headers.origin) {
       const origin = new URL(req.headers.origin);
       if (!['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)) return error(res, 403, 'Open the local Strata app to use host controls.');
+      // The hostname alone is not the boundary: a page on ANY localhost port reaches this host, and the chat routes ask for no
+      // token - a dev server, a notebook, or any other local page could set a chat to Bypass ("commands anywhere... without
+      // asking") and then stream a turn, which the person never sees approved.  A packaged app accepts only its own page; a
+      // development run keeps the wider rule, because the UI is then served by Vite on another port (`npm run dev:web`).
+      if (process.env.STRATA_PACKAGED === '1' && !SELF_ORIGINS.has(origin.origin)) return error(res, 403, 'Open the local Strata app to use host controls.');
     }
     if (path.startsWith('/api/')) {
       const modelOperation = !['GET', 'OPTIONS'].includes(method) && /^\/api\/(models|local-models|runtime|image-models|engine|native)(\/|$)/.test(path) && !['/api/runtime/plan', '/api/engine/validate', '/api/local-models/inspect'].includes(path);
